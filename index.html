@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html class="dark" lang="th">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>doomovie.today — ดูหนังที่ไหนดี</title>
+<meta name="description" content="เช็ครอบหนังทุกโรง Major Cineplex, SF Cinema, House Samyan ในที่เดียว"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Prompt:wght@300;400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+tailwind.config = {
+  darkMode:"class",
+  theme:{extend:{
+    colors:{
+      "primary":"#FF1493","on-primary":"#ffffff","primary-container":"#FF1493",
+      "background":"#000000","surface":"#000000",
+      "surface-container-lowest":"#000000","surface-container-low":"#050505",
+      "surface-container":"#0a0a0a","surface-container-high":"#111111",
+      "surface-container-highest":"#1a1a1a","surface-variant":"#1a1a1a",
+      "on-surface":"#ffffff","on-surface-variant":"#cccccc",
+      "outline":"#4a4a4a","outline-variant":"#333333",
+    },
+    fontFamily:{"headline":["Inter","Prompt","sans-serif"],"body":["Inter","sans-serif"],"thai":["Prompt","sans-serif"]},
+    borderRadius:{"DEFAULT":"1rem","lg":"2rem","xl":"3rem","full":"9999px"},
+  }}
+}
+</script>
+<style>
+  .material-symbols-outlined{font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24}
+  .thai{font-family:'Prompt',sans-serif}
+  .thai-adj{font-family:'Prompt',sans-serif;font-size:1.05em}
+  ::-webkit-scrollbar{display:none}
+  .glow-pink{box-shadow:0 0 15px rgba(255,20,147,0.4)}
+  .glow-pink-strong{box-shadow:0 0 30px rgba(255,20,147,0.6)}
+  .text-glow{text-shadow:0 0 8px rgba(255,20,147,0.5)}
+  body{background:#000;color:#fff}
+
+  /* Film grain */
+  body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:999;
+    background:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+    opacity:.5}
+
+  /* Ambient blobs */
+  .blob{position:fixed;border-radius:50%;filter:blur(130px);pointer-events:none;z-index:0;animation:drift 12s ease-in-out infinite alternate}
+  .blob-1{width:550px;height:550px;background:rgba(255,20,147,0.06);top:-180px;right:-120px}
+  .blob-2{width:400px;height:400px;background:rgba(255,20,147,0.04);bottom:-100px;left:-80px;animation-delay:-5s}
+  @keyframes drift{from{transform:translate(0,0)}to{transform:translate(35px,25px)}}
+
+  /* Skeleton */
+  .skel{background:linear-gradient(90deg,#111 25%,#1c1c1c 50%,#111 75%);background-size:200% 100%;animation:shim 1.5s infinite;border-radius:1rem}
+  @keyframes shim{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+  /* Pages */
+  .page{display:none}
+  .page.active{display:block;animation:fadeUp .3s ease}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+
+  /* Movie card */
+  .mcard{transition:transform .35s ease,box-shadow .35s ease;cursor:pointer}
+  .mcard:hover{transform:translateY(-6px) scale(1.015);box-shadow:0 24px 48px rgba(0,0,0,0.9),0 0 24px rgba(255,20,147,0.2)}
+  .mcard:hover .card-title{color:#FF1493}
+
+  /* Cinema card */
+  .ccard{transition:all .25s ease;cursor:pointer}
+  .ccard:hover{background:#111;border-color:rgba(255,20,147,0.3)!important}
+
+  /* Detail hero */
+  #detail-hero{background:linear-gradient(135deg,#0a0a0a 0%,#111 100%)}
+
+  /* Showtime slot */
+  .slot{transition:all .15s ease;cursor:pointer}
+  .slot:hover{background:#FF1493!important;border-color:#FF1493!important;box-shadow:0 0 15px rgba(255,20,147,0.5)!important}
+  .slot.sold{opacity:.3;cursor:not-allowed;text-decoration:line-through;pointer-events:none}
+
+  /* Search bar */
+  #search-bar{display:none}
+  #search-bar.open{display:block}
+</style>
+</head>
+<body class="font-body selection:bg-primary selection:text-white">
+
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+
+<!-- ═══ TOP NAV ═══════════════════════════════════════════════════════════ -->
+<header class="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-6 py-4 bg-[#000]/80 backdrop-blur-lg rounded-b-[2rem] shadow-[0_32px_64px_rgba(0,0,0,0.5)] border-b border-white/5">
+  <div class="flex items-center gap-6">
+    <span onclick="goHome()" class="text-xl font-black text-primary tracking-tighter text-glow cursor-pointer select-none">doomovie.today</span>
+    <nav class="hidden md:flex items-center gap-1 bg-surface-container-low rounded-full p-1 border border-outline-variant">
+      <button id="nb-movie" onclick="setMode('movie')" class="px-5 py-1.5 rounded-full bg-primary text-white font-bold text-sm glow-pink transition-all">🎬 หนัง</button>
+      <button id="nb-cinema" onclick="setMode('cinema')" class="px-5 py-1.5 rounded-full text-on-surface-variant font-medium text-sm hover:text-white transition-all">📍 โรง</button>
+    </nav>
+  </div>
+  <div class="flex items-center gap-3">
+    <button onclick="toggleSearch()" class="w-10 h-10 flex items-center justify-center rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container transition-all">
+      <span class="material-symbols-outlined">search</span>
+    </button>
+    <button id="gps-btn" onclick="requestGPS()" class="hidden md:flex items-center gap-1 px-4 py-2 rounded-full border border-outline-variant text-on-surface-variant hover:border-primary/50 hover:text-primary text-xs font-bold uppercase tracking-wider transition-all">
+      <span class="material-symbols-outlined text-sm">location_on</span><span id="gps-lbl">GPS</span>
+    </button>
+    <!-- Mobile mode toggle -->
+    <div class="flex md:hidden bg-surface-container-low rounded-full p-1 gap-1 border border-outline-variant">
+      <button id="mb-movie" onclick="setMode('movie')" class="px-3 py-1.5 rounded-full bg-primary text-white text-xs font-bold glow-pink transition-all">🎬</button>
+      <button id="mb-cinema" onclick="setMode('cinema')" class="px-3 py-1.5 rounded-full text-on-surface-variant text-xs transition-all">📍</button>
+    </div>
+  </div>
+</header>
+
+<!-- Search bar -->
+<div id="search-bar" class="fixed top-[72px] left-0 w-full z-40 px-6 py-3 bg-black/95 backdrop-blur-xl border-b border-outline-variant">
+  <input id="search-input" type="text" placeholder="ค้นหาหนังหรือโรงภาพยนตร์..." oninput="handleSearch(this.value)"
+    class="w-full bg-surface-container-high border border-outline-variant rounded-full px-5 py-3 text-white placeholder-on-surface-variant outline-none focus:border-primary/50 transition-colors thai text-sm"/>
+</div>
+
+<!-- ═══ MAIN ═══════════════════════════════════════════════════════════════ -->
+<main class="pt-24 pb-28 max-w-7xl mx-auto">
+
+  <!-- ── MOVIE MODE ───────────────────────────────────────────────────────── -->
+  <div id="page-movie" class="page active px-6">
+    <section class="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
+      <div>
+        <span class="text-primary uppercase tracking-[0.2em] font-bold text-[10px] block mb-2">Thailand Cinemas · Major · SF · House Samyan</span>
+        <h1 class="text-4xl md:text-6xl font-black tracking-[-0.04em]">Now Playing <span class="thai-adj font-bold">ฉายอยู่ตอนนี้</span></h1>
+      </div>
+      <div id="movie-dates" class="flex gap-3 overflow-x-auto pb-2 flex-shrink-0 max-w-sm"></div>
+    </section>
+    <section id="movie-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-5 gap-y-10"></section>
+  </div>
+
+  <!-- ── CINEMA MODE ──────────────────────────────────────────────────────── -->
+  <div id="page-cinema" class="page px-6">
+    <section class="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
+      <div>
+        <span class="text-primary uppercase tracking-[0.2em] font-bold text-[10px] block mb-2">Available Locations</span>
+        <h1 class="text-4xl md:text-5xl font-black tracking-[-0.04em]">Nearby Cinemas</h1>
+        <p class="text-on-surface-variant mt-2 text-sm thai">กด GPS เพื่อเรียงโรงตามระยะทาง</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <button onclick="requestGPS()" id="gps-btn2" class="flex items-center gap-2 px-5 py-2.5 rounded-full border border-primary/40 text-primary hover:bg-primary hover:text-white hover:glow-pink text-sm font-bold transition-all">
+          <span class="material-symbols-outlined text-sm">my_location</span> ใช้ GPS
+        </button>
+      </div>
+    </section>
+    <section id="cinema-list" class="space-y-4"></section>
+  </div>
+
+  <!-- ── MOVIE DETAIL ─────────────────────────────────────────────────────── -->
+  <div id="page-detail" class="page">
+    <!-- Hero -->
+    <div id="detail-hero" class="relative w-full overflow-hidden" style="height:65vh;min-height:380px">
+      <div class="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent z-10"></div>
+      <div class="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-transparent z-10"></div>
+      <img id="detail-bg" class="w-full h-full object-cover scale-105" src="" alt="" style="display:none"/>
+      <button onclick="goBack()" class="absolute top-4 left-4 z-20 flex items-center gap-2 bg-black/50 backdrop-blur px-4 py-2 rounded-full text-on-surface-variant hover:text-primary transition-colors text-sm">
+        <span class="material-symbols-outlined text-sm">arrow_back</span> กลับ
+      </button>
+      <div class="absolute bottom-0 left-0 w-full z-20 px-6 md:px-10 pb-10 max-w-4xl">
+        <div id="detail-chips" class="flex flex-wrap gap-2 mb-4"></div>
+        <h1 id="detail-title" class="text-4xl md:text-6xl font-black tracking-[-0.03em] leading-tight mb-1"></h1>
+        <p id="detail-title-th" class="text-on-surface-variant text-lg mb-3 thai"></p>
+        <p id="detail-synopsis" class="text-on-surface-variant text-sm max-w-2xl leading-relaxed mb-6 line-clamp-3 hidden md:block"></p>
+        <div class="flex gap-3">
+          <button id="trailer-btn" onclick="openTrailer()" class="hidden items-center gap-2 bg-surface-container-highest/70 backdrop-blur text-white font-bold px-6 py-3 rounded-full border border-white/10 hover:border-primary/50 transition-all text-sm">
+            <span class="material-symbols-outlined text-primary text-sm">play_circle</span> ดูตัวอย่าง
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- Showtimes -->
+    <div class="px-6 md:px-10 pt-6 max-w-6xl mx-auto">
+      <div class="flex items-center justify-between mb-6 flex-wrap gap-4">
+        <h2 class="text-xl font-black">รอบฉาย <span id="detail-date-label" class="text-on-surface-variant font-medium text-base thai"></span></h2>
+        <div id="detail-dates" class="flex gap-2 overflow-x-auto pb-1 max-w-xs md:max-w-none"></div>
+      </div>
+      <div id="detail-showtimes" class="space-y-5"></div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Bottom nav (mobile) -->
+<div class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center py-3 px-8 bg-black/95 backdrop-blur-xl border-t border-outline-variant md:hidden">
+  <button onclick="setMode('movie')" class="flex flex-col items-center gap-1 text-primary">
+    <span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1">movie</span>
+    <span class="text-[10px] font-bold thai">หนัง</span>
+  </button>
+  <button onclick="setMode('cinema')" class="flex flex-col items-center gap-1 text-on-surface-variant hover:text-primary transition-colors">
+    <span class="material-symbols-outlined">location_on</span>
+    <span class="text-[10px] font-bold thai">โรงหนัง</span>
+  </button>
+  <button onclick="requestGPS()" class="flex flex-col items-center gap-1 text-on-surface-variant hover:text-primary transition-colors">
+    <span class="material-symbols-outlined">my_location</span>
+    <span class="text-[10px] font-bold">GPS</span>
+  </button>
+</div>
+
+<!-- Footer -->
+<footer class="hidden md:block text-center pb-6 text-on-surface-variant text-xs border-t border-outline-variant pt-6 max-w-7xl mx-auto px-6">
+  ข้อมูลรอบหนังจาก <a href="https://www.majorcineplex.com" target="_blank" class="text-primary hover:underline">Major Cineplex</a> · <a href="https://www.sfcinema.com" target="_blank" class="text-primary hover:underline">SF Cinema</a> · <a href="https://www.housesamyan.com" target="_blank" class="text-primary hover:underline">House Samyan</a>
+  &nbsp;·&nbsp; ภาพโปสเตอร์จาก <a href="https://www.themoviedb.org" target="_blank" class="text-primary hover:underline">TMDB</a>
+  &nbsp;·&nbsp; doomovie.today — website #4 of 100
+</footer>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+// CONFIG
+// ════════════════════════════════════════════════════════════════════════════
+const API_BASE   = 'https://doomovie-production.up.railway.app/api';
+// TMDB — free, just needs an API read token
+// Get yours FREE at https://www.themoviedb.org/settings/api (takes 2 min)
+// Then replace the string below with your Bearer token
+const TMDB_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjY2I1MzYwODNmZjUxZjI5MGQ1NWRjMzgwZDE2ZDlhZCIsIm5iZiI6MTc3NTA3NTQwNy41NTMsInN1YiI6IjY5Y2Q4MDRmYjQwNzg1YWI4YmE2MzcwZiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.0mdc6AB5oWTH3VWhCfcKa9NSQsKqidWeAphKShbsxYM';
+const TMDB_IMG   = 'https://image.tmdb.org/t/p';
+const HAS_TMDB   = TMDB_TOKEN !== 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjY2I1MzYwODNmZjUxZjI5MGQ1NWRjMzgwZDE2ZDlhZCIsIm5iZiI6MTc3NTA3NTQwNy41NTMsInN1YiI6IjY5Y2Q4MDRmYjQwNzg1YWI4YmE2MzcwZiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.0mdc6AB5oWTH3VWhCfcKa9NSQsKqidWeAphKShbsxYM';
+
+// ════════════════════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════════════════════
+const S = {
+  mode:'movie', date:todayStr(),
+  lat:null, lng:null, query:'',
+  movies:[], cinemas:[],
+  tmdbCache:{},   // title → { poster_path, backdrop_path, id, overview }
+  trailerUrl:null,
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// UTILS
+// ════════════════════════════════════════════════════════════════════════════
+function todayStr(){
+  const d = new Date(Date.now()+7*3600000);
+  return d.toISOString().split('T')[0];
+}
+function thDayName(d){ return ['อา','จ','อ','พ','พฤ','ศ','ส'][d.getDay()]; }
+function fmtTime(iso){
+  return new Date(iso).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Bangkok'});
+}
+function fmtDateTH(str){
+  return new Date(str).toLocaleDateString('th-TH',{weekday:'long',day:'numeric',month:'long'});
+}
+
+// TMDB poster — poster_url from our API first, TMDB enrichment as fallback/enhancement
+function getPosterSrc(movie){
+  // If we have a real poster from SF/Major API, use it
+  if(movie.poster_url && !movie.poster_url.includes('lh3.google')) return movie.poster_url;
+  // Try TMDB cache
+  const t = S.tmdbCache[movie._tmdbKey];
+  if(t?.poster_path) return `${TMDB_IMG}/w342${t.poster_path}`;
+  // Original poster_url as last resort
+  return movie.poster_url || null;
+}
+function getBackdropSrc(movie){
+  const t = S.tmdbCache[movie._tmdbKey];
+  if(t?.backdrop_path) return `${TMDB_IMG}/w1280${t.backdrop_path}`;
+  if(movie.backdrop_url) return movie.backdrop_url;
+  if(movie.poster_url) return movie.poster_url;
+  return null;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// TMDB ENRICHMENT
+// ════════════════════════════════════════════════════════════════════════════
+async function enrichWithTMDB(movies){
+  if(!HAS_TMDB) return; // skip if no token
+
+  const toFetch = movies.filter(m => !S.tmdbCache[m._tmdbKey]);
+  if(!toFetch.length) return;
+
+  // Batch search — 5 at a time to avoid rate limits
+  const chunks = [];
+  for(let i=0;i<toFetch.length;i+=5) chunks.push(toFetch.slice(i,i+5));
+
+  for(const chunk of chunks){
+    await Promise.allSettled(chunk.map(async m => {
+      const q = encodeURIComponent(m.title_en || m.title_th);
+      const res = await fetch(`https://api.themoviedb.org/3/search/movie?query=${q}&language=th-TH&page=1`, {
+        headers:{ Authorization:`Bearer ${TMDB_TOKEN}` }
+      });
+      if(!res.ok) return;
+      const data = await res.json();
+      const hit = data.results?.[0];
+      if(hit){
+        S.tmdbCache[m._tmdbKey] = {
+          poster_path:   hit.poster_path,
+          backdrop_path: hit.backdrop_path,
+          overview:      hit.overview,
+          tmdb_id:       hit.id,
+          vote_average:  hit.vote_average,
+        };
+      }
+    }));
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// DATE PILLS
+// ════════════════════════════════════════════════════════════════════════════
+function buildDates(containerId, onSelect){
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  el.innerHTML = '';
+  for(let i=0;i<7;i++){
+    const d = new Date(Date.now()+7*3600000);
+    d.setDate(d.getDate()+i);
+    const str = d.toISOString().split('T')[0];
+    const active = str===S.date;
+    const label  = i===0?'วันนี้':i===1?'พรุ่งนี้':thDayName(d);
+    const btn = document.createElement('button');
+    btn.dataset.date = str;
+    btn.innerHTML = `<span class="text-[9px] uppercase font-bold tracking-wider thai block">${label}</span><span class="text-xl font-black">${d.getDate()}</span>`;
+    btn.className = `flex flex-col items-center justify-center min-w-[56px] h-[68px] rounded-2xl flex-shrink-0 transition-all border ${
+      active ? 'bg-primary text-white glow-pink border-transparent'
+             : 'bg-surface-container border-outline-variant text-on-surface-variant hover:border-primary/40'}`;
+    btn.onclick = ()=>{ S.date=str; refreshAllDates(); onSelect(str); };
+    el.appendChild(btn);
+  }
+}
+function refreshAllDates(){
+  ['movie-dates','detail-dates'].forEach(id=>{
+    document.querySelectorAll(`#${id} button`).forEach(b=>{
+      const active = b.dataset.date===S.date;
+      b.className = `flex flex-col items-center justify-center min-w-[56px] h-[68px] rounded-2xl flex-shrink-0 transition-all border ${
+        active ? 'bg-primary text-white glow-pink border-transparent'
+               : 'bg-surface-container border-outline-variant text-on-surface-variant hover:border-primary/40'}`;
+    });
+  });
+  document.getElementById('detail-date-label').textContent = fmtDateTH(S.date);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MODE
+// ════════════════════════════════════════════════════════════════════════════
+function setMode(mode){
+  S.mode=mode;
+  // Nav buttons
+  const movieActive  = 'px-5 py-1.5 rounded-full bg-primary text-white font-bold text-sm glow-pink transition-all';
+  const movieInactive= 'px-5 py-1.5 rounded-full text-on-surface-variant font-medium text-sm hover:text-white transition-all';
+  const mobActive    = 'px-3 py-1.5 rounded-full bg-primary text-white text-xs font-bold glow-pink transition-all';
+  const mobInactive  = 'px-3 py-1.5 rounded-full text-on-surface-variant text-xs transition-all';
+  document.getElementById('nb-movie').className  = mode==='movie' ? movieActive  : movieInactive;
+  document.getElementById('nb-cinema').className = mode==='cinema'? movieActive  : movieInactive;
+  document.getElementById('mb-movie').className  = mode==='movie' ? mobActive    : mobInactive;
+  document.getElementById('mb-cinema').className = mode==='cinema'? mobActive    : mobInactive;
+  showPage(mode==='movie'?'page-movie':'page-cinema');
+  if(mode==='movie') loadMovies(); else loadCinemas();
+}
+function showPage(id){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById(id)?.classList.add('active');
+}
+function goHome(){ showPage(S.mode==='movie'?'page-movie':'page-cinema'); }
+function goBack(){
+  showPage(S.mode==='movie'?'page-movie':'page-cinema');
+  document.getElementById('detail-hero').style.height='';
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SEARCH
+// ════════════════════════════════════════════════════════════════════════════
+function toggleSearch(){
+  const bar = document.getElementById('search-bar');
+  bar.classList.toggle('open');
+  if(bar.classList.contains('open')) document.getElementById('search-input').focus();
+}
+function handleSearch(val){
+  S.query=val.toLowerCase();
+  if(S.mode==='movie') renderMovies(S.movies);
+  else renderCinemas(S.cinemas);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// GPS
+// ════════════════════════════════════════════════════════════════════════════
+function requestGPS(){
+  const lbl1=document.getElementById('gps-lbl');
+  if(lbl1) lbl1.textContent='...';
+  navigator.geolocation.getCurrentPosition(pos=>{
+    S.lat=pos.coords.latitude; S.lng=pos.coords.longitude;
+    if(lbl1){lbl1.textContent='On';document.getElementById('gps-btn').classList.add('text-primary','border-primary/50');}
+    document.getElementById('gps-btn2')?.classList.add('bg-primary','text-white','glow-pink');
+    if(S.mode==='cinema') loadCinemas();
+  },()=>{ if(lbl1) lbl1.textContent='GPS'; });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// LOAD MOVIES
+// ════════════════════════════════════════════════════════════════════════════
+async function loadMovies(){
+  renderMovieSkeleton();
+  try{
+    const res  = await fetch(`${API_BASE}/movies/now-playing`);
+    const data = await res.json();
+    S.movies   = (data.data||[]).map(m=>({ ...m, _tmdbKey:m.title_en||m.title_th }));
+    renderMovies(S.movies);
+    // Enrich with TMDB in background — re-render when done
+    if(HAS_TMDB){
+      enrichWithTMDB(S.movies).then(()=>renderMovies(S.movies));
+    }
+  }catch(e){ showErr('movie-grid','ไม่สามารถโหลดข้อมูลได้ กรุณาลองใหม่'); }
+}
+
+function renderMovies(all){
+  const movies = S.query ? all.filter(m=>(m.title_en||'').toLowerCase().includes(S.query)||(m.title_th||'').toLowerCase().includes(S.query)) : all;
+  const grid   = document.getElementById('movie-grid');
+  if(!movies.length){ grid.innerHTML=`<div class="col-span-full py-20 text-center text-on-surface-variant"><p class="text-5xl mb-4">🎬</p><p class="thai">ไม่พบหนัง</p></div>`; return; }
+
+  grid.innerHTML = movies.map((m,i)=>{
+    const poster = getPosterSrc(m);
+    const genre  = (m.genre||'').split(',')[0].trim();
+    return `
+    <div class="mcard group" onclick="openDetail('${m.id}')" style="animation:fadeUp .35s ease ${i*.04}s both">
+      <div class="relative aspect-[2/3] rounded-lg overflow-hidden mb-4 shadow-[0_12px_24px_rgba(0,0,0,0.85)] transition-transform duration-500 group-hover:scale-[1.02] border border-white/5">
+        ${poster
+          ? `<img src="${poster}" alt="${m.title_en||m.title_th}" class="w-full h-full object-cover" loading="lazy"
+               onerror="this.parentElement.innerHTML='<div class=\'w-full h-full bg-surface-container-high flex items-center justify-center\'>🎬</div>'">`
+          : `<div class="w-full h-full bg-surface-container-high flex items-center justify-center text-5xl">🎬</div>`}
+        <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent opacity-75"></div>
+        ${m.rating?`<div class="absolute top-3 left-3"><span class="bg-black/70 backdrop-blur text-primary font-black px-2 py-1 rounded text-xs glow-pink border border-primary/30">${m.rating}</span></div>`:''}
+        <div class="absolute bottom-3 left-3 right-3 flex flex-wrap gap-1">
+          ${genre?`<span class="bg-primary/20 backdrop-blur text-primary text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-tight border border-primary/50">${genre}</span>`:''}
+          ${m.runtime?`<span class="bg-white/10 backdrop-blur text-white text-[9px] font-bold px-2 py-0.5 rounded-full border border-white/20">${m.runtime}น.</span>`:''}
+        </div>
+      </div>
+      <h3 class="card-title font-bold text-base leading-tight transition-colors thai">${m.title_th||m.title_en}</h3>
+      ${m.title_th&&m.title_en?`<p class="text-on-surface-variant text-xs mt-1 truncate">${m.title_en}</p>`:''}
+    </div>`;
+  }).join('');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// LOAD CINEMAS
+// ════════════════════════════════════════════════════════════════════════════
+async function loadCinemas(){
+  renderCinemaSkeleton();
+  try{
+    let url = `${API_BASE}/cinemas`;
+    if(S.lat&&S.lng) url+=`?lat=${S.lat}&lng=${S.lng}`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    S.cinemas  = data.data||[];
+    renderCinemas(S.cinemas);
+  }catch(e){ showErr('cinema-list','ไม่สามารถโหลดข้อมูลได้'); }
+}
+
+function renderCinemas(all){
+  const cinemas = S.query ? all.filter(c=>(c.name_en||'').toLowerCase().includes(S.query)||(c.name_th||'').toLowerCase().includes(S.query)) : all;
+  const list    = document.getElementById('cinema-list');
+  const icons   = {major:'🎭',sf:'🎪',house:'🏠'};
+  const srcName = {major:'Major Cineplex',sf:'SF Cinema',house:'House Samyan'};
+  const srcCls  = {major:'text-yellow-400 border-yellow-400/30 bg-yellow-400/10',sf:'text-blue-400 border-blue-400/30 bg-blue-400/10',house:'text-primary border-primary/30 bg-primary/10'};
+
+  list.innerHTML = cinemas.slice(0,50).map((c,i)=>`
+    <article onclick="openCinemaDetail('${c.id}')" class="ccard group flex items-center bg-surface-container-low border border-outline-variant rounded-lg p-5 gap-5 overflow-hidden" style="animation:fadeUp .25s ease ${i*.025}s both">
+      <div class="w-14 h-14 flex-shrink-0 bg-surface-container-high rounded-2xl flex items-center justify-center text-2xl">${icons[c.source]||'🎬'}</div>
+      <div class="flex-grow min-w-0">
+        <h2 class="font-bold text-base tracking-tight thai truncate">${c.name_th||c.name_en}</h2>
+        <div class="flex items-center gap-2 mt-1 flex-wrap">
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border ${srcCls[c.source]||'text-on-surface-variant border-outline-variant bg-surface-container'}">${srcName[c.source]||c.source}</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 flex-shrink-0">
+        ${c.distance_km!==undefined?`<div class="text-right"><div class="text-primary font-black text-sm">${c.distance_km}km</div><div class="text-[9px] text-on-surface-variant uppercase">จากคุณ</div></div>`:''}
+        <div class="bg-surface-container-high group-hover:bg-primary group-hover:glow-pink border border-outline-variant group-hover:border-transparent px-4 py-2 rounded-xl flex items-center gap-1 transition-all duration-300 text-xs font-bold whitespace-nowrap">
+          ดูรอบ <span class="material-symbols-outlined text-sm">arrow_forward_ios</span>
+        </div>
+      </div>
+    </article>`).join('');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MOVIE DETAIL
+// ════════════════════════════════════════════════════════════════════════════
+async function openDetail(movieId){
+  const movie = S.movies.find(m=>m.id===movieId);
+  if(!movie) return;
+  showPage('page-detail');
+
+  // Hero backdrop — prefer TMDB backdrop (wider/cinematic)
+  const bd  = getBackdropSrc(movie);
+  const bgEl= document.getElementById('detail-bg');
+  if(bd){ bgEl.src=bd; bgEl.style.display='block'; } else bgEl.style.display='none';
+
+  // Text
+  document.getElementById('detail-title').textContent    = movie.title_en||movie.title_th;
+  document.getElementById('detail-title-th').textContent = movie.title_th||'';
+  // Use TMDB overview (in Thai) if available, else our synopsis
+  const tmdbEntry = S.tmdbCache[movie._tmdbKey];
+  document.getElementById('detail-synopsis').textContent = tmdbEntry?.overview || movie.synopsis || '';
+
+  // Chips
+  document.getElementById('detail-chips').innerHTML = [
+    movie.rating ? `<span class="bg-primary text-white px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider glow-pink">${movie.rating}</span>` : '',
+    movie.runtime? `<span class="bg-surface-container-highest/80 backdrop-blur text-on-surface-variant px-3 py-1 rounded-full text-[10px] font-bold uppercase">${movie.runtime} MIN</span>` : '',
+    movie.genre  ? `<span class="bg-surface-container-highest text-on-surface px-3 py-1 rounded-full text-[10px] font-bold uppercase">${movie.genre.split(',')[0].trim()}</span>` : '',
+  ].filter(Boolean).join('');
+
+  // Trailer
+  S.trailerUrl = movie.trailer_url || null;
+  const tb = document.getElementById('trailer-btn');
+  tb.style.display = S.trailerUrl ? 'flex' : 'none';
+
+  // Dates
+  buildDates('detail-dates', ()=> loadShowtimesForMovie(movieId));
+  document.getElementById('detail-date-label').textContent = fmtDateTH(S.date);
+
+  // Showtimes
+  document.getElementById('detail-showtimes').innerHTML = skelBlock(3,'h-24');
+  await loadShowtimesForMovie(movieId);
+}
+
+async function loadShowtimesForMovie(movieId){
+  document.getElementById('detail-showtimes').innerHTML = skelBlock(3,'h-24');
+  try{
+    const res  = await fetch(`${API_BASE}/showtimes?movie=${movieId}&date=${S.date}`);
+    const data = await res.json();
+    renderMovieShowtimes(data.data||[]);
+  }catch{ document.getElementById('detail-showtimes').innerHTML=`<p class="text-on-surface-variant thai py-8 text-center">ไม่พบรอบฉาย</p>`; }
+}
+
+function renderMovieShowtimes(groups){
+  if(!groups.length){
+    document.getElementById('detail-showtimes').innerHTML=`<div class="text-center py-16 text-on-surface-variant"><p class="text-5xl mb-4">🎭</p><p class="thai">ไม่พบรอบฉายในวันที่เลือก</p><p class="text-sm mt-2">ลองเลือกวันอื่น</p></div>`;
+    return;
+  }
+  document.getElementById('detail-showtimes').innerHTML = groups.map(cg=>`
+    <div class="bg-surface-container-low rounded-lg p-5 border border-outline-variant">
+      <h3 class="font-bold text-base mb-4 thai">${cg.name_th||cg.name_en}</h3>
+      <div class="flex flex-wrap gap-2">${(cg.showtimes||[]).map(s=>`
+        <a href="${s.booking_url}" target="_blank" rel="noopener"
+          class="slot ${s.is_sold_out?'sold':''} flex flex-col items-center px-4 py-2.5 rounded-xl bg-surface-container-high border border-outline-variant min-w-[72px] text-center no-underline">
+          <span class="font-black text-sm text-white">${fmtTime(s.show_time)}</span>
+          ${s.screen_type!=='STANDARD'?`<span class="text-[9px] text-primary font-bold mt-0.5">${s.screen_type}</span>`:''}
+          ${s.audio&&s.audio!=='TH'?`<span class="text-[9px] text-on-surface-variant">${s.audio}</span>`:''}
+        </a>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CINEMA DETAIL
+// ════════════════════════════════════════════════════════════════════════════
+async function openCinemaDetail(cinemaId){
+  const cinema = S.cinemas.find(c=>c.id===cinemaId);
+  if(!cinema) return;
+  showPage('page-detail');
+
+  // Compact hero (no backdrop for cinema)
+  document.getElementById('detail-bg').style.display='none';
+  document.getElementById('detail-hero').style.height='160px';
+  document.getElementById('detail-title').textContent    = cinema.name_en||cinema.name_th;
+  document.getElementById('detail-title-th').textContent = cinema.name_th||'';
+  document.getElementById('detail-synopsis').textContent = '';
+  document.getElementById('detail-chips').innerHTML      = '';
+  document.getElementById('trailer-btn').style.display   = 'none';
+
+  buildDates('detail-dates', ()=>loadShowtimesForCinema(cinemaId));
+  document.getElementById('detail-date-label').textContent = fmtDateTH(S.date);
+  document.getElementById('detail-showtimes').innerHTML   = skelBlock(3,'h-24');
+  await loadShowtimesForCinema(cinemaId);
+}
+
+async function loadShowtimesForCinema(cinemaId){
+  document.getElementById('detail-showtimes').innerHTML = skelBlock(3,'h-24');
+  // reset hero height
+  document.getElementById('detail-hero').style.height='';
+  try{
+    const res  = await fetch(`${API_BASE}/showtimes?cinema=${cinemaId}&date=${S.date}`);
+    const data = await res.json();
+    renderCinemaShowtimes(data.data||[]);
+  }catch{ document.getElementById('detail-showtimes').innerHTML=`<p class="text-on-surface-variant thai py-8 text-center">ไม่พบรอบฉาย</p>`; }
+}
+
+function renderCinemaShowtimes(groups){
+  if(!groups.length){
+    document.getElementById('detail-showtimes').innerHTML=`<div class="text-center py-16 text-on-surface-variant"><p class="text-5xl mb-4">🎬</p><p class="thai">ไม่พบรอบฉายในวันที่เลือก</p></div>`;
+    return;
+  }
+  document.getElementById('detail-showtimes').innerHTML = groups.map(mg=>{
+    const poster = mg.poster_url;
+    return `
+    <div class="bg-surface-container-low rounded-lg p-5 border border-outline-variant">
+      <div class="flex items-start gap-4 mb-4">
+        ${poster?`<img src="${poster}" alt="" class="w-12 h-[72px] object-cover rounded-lg flex-shrink-0" onerror="this.style.display='none'">`:''}
+        <div>
+          <h3 class="font-bold text-base leading-tight thai">${mg.title_th||mg.title_en}</h3>
+          <div class="flex gap-2 mt-1 flex-wrap">
+            ${mg.rating?`<span class="text-[9px] px-2 py-0.5 bg-primary/10 text-primary rounded-full border border-primary/30 font-bold">${mg.rating}</span>`:''}
+            ${mg.runtime?`<span class="text-[9px] px-2 py-0.5 bg-surface-container text-on-surface-variant rounded-full">${mg.runtime}น.</span>`:''}
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2">${(mg.showtimes||[]).map(s=>`
+        <a href="${s.booking_url}" target="_blank" rel="noopener"
+          class="slot ${s.is_sold_out?'sold':''} flex flex-col items-center px-4 py-2.5 rounded-xl bg-surface-container-high border border-outline-variant min-w-[72px] text-center no-underline">
+          <span class="font-black text-sm text-white">${fmtTime(s.show_time)}</span>
+          ${s.screen_type!=='STANDARD'?`<span class="text-[9px] text-primary font-bold mt-0.5">${s.screen_type}</span>`:''}
+          ${s.audio&&s.audio!=='TH'?`<span class="text-[9px] text-on-surface-variant">${s.audio}</span>`:''}
+        </a>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MISC
+// ════════════════════════════════════════════════════════════════════════════
+function openTrailer(){ if(S.trailerUrl) window.open(S.trailerUrl,'_blank'); }
+
+function renderMovieSkeleton(){
+  document.getElementById('movie-grid').innerHTML = Array(10).fill(0).map(()=>`
+    <div><div class="skel aspect-[2/3] mb-4"></div><div class="skel h-4 mb-2 w-3/4"></div><div class="skel h-3 w-1/2"></div></div>`).join('');
+}
+function renderCinemaSkeleton(){
+  document.getElementById('cinema-list').innerHTML = Array(5).fill(0).map(()=>`<div class="skel h-24"></div>`).join('');
+}
+function skelBlock(n, cls){
+  return `<div class="space-y-4">${Array(n).fill(0).map(()=>`<div class="skel ${cls}"></div>`).join('')}</div>`;
+}
+function showErr(id,msg){
+  document.getElementById(id).innerHTML=`<div class="col-span-full text-center py-16 text-on-surface-variant"><p class="text-4xl mb-4">⚠️</p><p class="thai">${msg}</p></div>`;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// BOOT
+// ════════════════════════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', ()=>{
+  buildDates('movie-dates', ()=>loadMovies());
+  loadMovies();
+  loadCinemas();
+});
+</script>
+</body>
+</html>
