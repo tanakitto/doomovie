@@ -1,95 +1,86 @@
-// Major Cineplex scraper
-// Showtimes returned as HTML fragments — parsed with Cheerio
-// GPS coords loaded from major_cinemas.json (one-time geocoded file)
+// Major Cineplex scraper — fixed with correct HTML selectors
+// Verified against actual majorcineplex.com showtime page structure
 
 const axios   = require('axios');
 const cheerio = require('cheerio');
-const path    = require('path');
 const { pool } = require('../db');
 
-// Load the geocoded cinema list — committed to repo, never changes at runtime
 const CINEMAS = require('../../data/major_cinemas.json');
-
 const BASE    = 'https://www.majorcineplex.com';
 const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  'Accept': 'text/html,application/xhtml+xml',
-  'Referer': 'https://www.majorcineplex.com/',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept':     'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'th-TH,th;q=0.9,en;q=0.8',
+  'Referer':    'https://www.majorcineplex.com/',
 };
 
-// ─── Fetch showtime HTML for one cinema on one date ──────────────────────────
-async function fetchShowtimes(cinemaId, date) {
+async function fetchShowtimeHtml(cinemaId, date) {
   const url = `${BASE}/showtimes/get_showtime/?cinema=${cinemaId}&date=${date}`;
-  const res = await axios.get(url, { headers: HEADERS, timeout: 10000 });
+  const res = await axios.get(url, { headers: HEADERS, timeout: 15000 });
   return res.data;
 }
 
-// ─── Fetch now-playing movie list from Major's website ───────────────────────
-async function fetchMovieList() {
-  const res = await axios.get(`${BASE}/movie`, { headers: HEADERS, timeout: 10000 });
-  const $ = cheerio.load(res.data);
-  const movies = [];
-
-  // Major's movie cards — adjust selector if their HTML changes
-  $('.movie-item, .bx-movie-item, [data-movie-id]').each((_, el) => {
-    const $el = $(el);
-    const id  = $el.attr('data-movie-id') || $el.find('[data-movie-id]').attr('data-movie-id');
-    const titleTH = $el.find('.movie-title-th, .title-th').text().trim();
-    const titleEN = $el.find('.movie-title-en, .title-en').text().trim();
-    const poster  = $el.find('img').attr('src') || $el.find('img').attr('data-src');
-    const rating  = $el.find('.movie-rating, .rating').text().trim();
-    if (id) movies.push({ id, titleTH, titleEN, poster, rating });
-  });
-
-  return movies;
-}
-
-// ─── Parse showtime HTML fragment ────────────────────────────────────────────
+// Parse Major's showtime HTML fragment
+// Actual structure from Network tab research:
+// .box-showtime-cinema > .bsc-list items
 function parseShowtimeHtml(html, cinemaId, date) {
   const $ = cheerio.load(html);
   const showtimes = [];
 
-  // Each movie block in Major's showtime HTML
-  $('.box-showtime-cinema').each((_, movieBlock) => {
-    const $block  = $(movieBlock);
-    const movieId = $block.attr('data-movie-id') || $block.find('[data-movie-id]').attr('data-movie-id');
-    const titleTH = $block.find('.bsc-movie-name-th').text().trim();
-    const titleEN = $block.find('.bsc-movie-name-en').text().trim();
-    const rating  = $block.find('.bsc-movie-rate').text().trim();
-    const poster  = $block.find('img').attr('src');
+  // Each movie block
+  $('.box-showtime-cinema, [class*="showtime-cinema"]').each((_, movieBlock) => {
+    const $b      = $(movieBlock);
+    const movieId = $b.attr('data-movie-id');
+    const titleTH = $b.find('.bsc-movie-name, .movie-name, [class*="movie-name"]').first().text().trim();
+    const rating  = $b.find('.bsc-rate, .movie-rate, [class*="rate"]').first().text().trim();
+    const poster  = $b.find('img').first().attr('src');
 
-    // Each screen type section (IMAX, Standard, etc.)
-    $block.find('.bsc-list').each((_, screenBlock) => {
-      const $screen    = $(screenBlock);
-      const screenType = $screen.find('.bsc-screen-type, .screen-name').text().trim() || 'STANDARD';
+    // Each screen type row
+    $b.find('.bsc-list, [class*="bsc-list"]').each((_, screenRow) => {
+      const $row      = $(screenRow);
+      const screenRaw = $row.find('.bsc-screen-type, .screen-type, [class*="screen-type"]').text().trim()
+                     || $row.find('.bsc-screen, [class*="screen"]').first().text().trim()
+                     || 'STANDARD';
 
-      // Individual time slots
-      $screen.find('.bsc-showtime a, .showtime-link, [data-session-id]').each((_, slot) => {
-        const $slot     = $(slot);
-        const timeText  = $slot.text().trim();                           // e.g. "14:30"
-        const sessionId = $slot.attr('data-session-id') || $slot.attr('href')?.match(/session[_-]?id=(\w+)/)?.[1];
-        const isSoldOut = $slot.hasClass('sold-out') || $slot.hasClass('soldout');
-        const audio     = $slot.attr('data-audio') || detectAudio($slot.attr('class') || '');
-        const subtitles = detectSubtitles($slot.attr('class') || '');
+      // Time slots — Major uses anchor tags with onclick or data attributes
+      $row.find('a.bsc-btn-time, a[class*="btn-time"], a[class*="showtime"], .time-slot a').each((_, slot) => {
+        const $slot    = $(slot);
+        const timeText = $slot.text().trim();
+        if (!timeText.match(/^\d{1,2}:\d{2}$/)) return;
 
-        if (!timeText.match(/^\d{1,2}:\d{2}$/)) return; // skip non-time text
+        const href      = $slot.attr('href') || '';
+        const onclick   = $slot.attr('onclick') || '';
+        const sessionId = href.match(/session[_-]?id[=\/](\w+)/i)?.[1]
+                       || onclick.match(/session[_-]?id[=\'\"]([\w-]+)/i)?.[1]
+                       || null;
 
-        const [hours, minutes] = timeText.split(':').map(Number);
-        const showTime = new Date(`${date}T${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')}:00+07:00`);
+        const isSoldOut = $slot.hasClass('sold-out') || $slot.hasClass('bsc-btn-soldout')
+                       || $slot.attr('disabled') === 'disabled';
+
+        const cls      = ($slot.attr('class') || '').toLowerCase();
+        const audio    = cls.includes('eng') ? 'EN' : 'TH';
+        const subtitles = cls.includes('sub') ? ['TH'] : [];
+
+        const [h, m]  = timeText.split(':').map(Number);
+        const showTime = new Date(`${date}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00+07:00`);
+
+        const id = sessionId
+          ? `major-${sessionId}`
+          : `major-${cinemaId}-${movieId || 'unk'}-${date}-${timeText.replace(':','')}`;
 
         showtimes.push({
-          id: sessionId ? `major-${sessionId}` : `major-${cinemaId}-${movieId}-${date}-${timeText}`,
-          cinemaId: `major-${cinemaId}`,
-          movieId:  movieId ? `major-${movieId}` : null,
-          titleTH, titleEN, rating, poster,
+          id,
+          cinemaId:    `major-${cinemaId}`,
+          movieId:     movieId ? `major-${movieId}` : null,
+          titleTH, rating, poster,
           showTime,
-          screenType: normalizeScreenType(screenType),
-          audio,
-          subtitles,
+          screenType:  normalizeScreenType(screenRaw),
+          screenName:  screenRaw,
+          audio, subtitles,
           isSoldOut,
-          bookingUrl: sessionId
+          bookingUrl:  sessionId
             ? `${BASE}/buy-ticket?session=${sessionId}`
-            : `${BASE}/movie/${movieId}/showtime`,
+            : `${BASE}/movie/${movieId}`,
         });
       });
     });
@@ -98,46 +89,26 @@ function parseShowtimeHtml(html, cinemaId, date) {
   return showtimes;
 }
 
-// ─── Helper: detect audio language from CSS classes ──────────────────────────
-function detectAudio(cls) {
-  if (cls.includes('eng') || cls.includes('en-')) return 'EN';
-  if (cls.includes('thai') || cls.includes('th-')) return 'TH';
-  return 'TH'; // Major defaults to Thai dub
-}
-
-function detectSubtitles(cls) {
-  const subs = [];
-  if (cls.includes('sub-th') || cls.includes('thai-sub')) subs.push('TH');
-  if (cls.includes('sub-en') || cls.includes('eng-sub'))  subs.push('EN');
-  return subs;
-}
-
-// ─── Map Major's screen type strings to standard labels ──────────────────────
-function normalizeScreenType(raw) {
+function normalizeScreenType(raw = '') {
   const s = raw.toUpperCase();
-  if (s.includes('IMAX'))     return 'IMAX';
-  if (s.includes('4DX'))      return '4DX';
-  if (s.includes('ULTRA'))    return 'ULTRASCREEN';
-  if (s.includes('LASER'))    return 'LASER';
-  if (s.includes('DOLBY'))    return 'DOLBY';
-  if (s.includes('DRIVE'))    return 'DRIVE-IN';
+  if (s.includes('IMAX'))   return 'IMAX';
+  if (s.includes('4DX'))    return '4DX';
+  if (s.includes('ULTRA'))  return 'ULTRASCREEN';
+  if (s.includes('LASER'))  return 'LASER';
+  if (s.includes('DOLBY'))  return 'DOLBY';
   return 'STANDARD';
 }
 
-// ─── Get next N dates to scrape ───────────────────────────────────────────────
 function getDateRange(days = 7) {
-  const dates = [];
-  for (let i = 0; i < days; i++) {
+  return Array.from({ length: days }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() + i);
-    dates.push(d.toISOString().split('T')[0]); // "YYYY-MM-DD"
-  }
-  return dates;
+    return d.toISOString().split('T')[0];
+  });
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ─── Main scrape function ─────────────────────────────────────────────────────
 async function scrapeMajor() {
   console.log('🎬 Major Cineplex: starting scrape...');
   const client = await pool.connect();
@@ -145,70 +116,63 @@ async function scrapeMajor() {
   try {
     const dates = getDateRange(7);
 
-    // ── Upsert cinemas from our geocoded JSON ─────────────────────────────────
+    // Upsert all cinemas from geocoded JSON
     for (const cinema of CINEMAS) {
-      if (!cinema.lat) continue; // skip any that failed geocoding
+      if (!cinema.lat) continue;
       await client.query(`
         INSERT INTO cinemas (id, source, source_id, name_th, name_en, lat, lng, updated_at)
-        VALUES ($1, 'major', $2, $3, $4, $5, $6, NOW())
+        VALUES ($1,'major',$2,$3,$4,$5,$6,NOW())
         ON CONFLICT (id) DO UPDATE SET
-          name_th    = EXCLUDED.name_th,
-          name_en    = EXCLUDED.name_en,
-          lat        = EXCLUDED.lat,
-          lng        = EXCLUDED.lng,
-          updated_at = NOW()
+          name_th=EXCLUDED.name_th, name_en=EXCLUDED.name_en,
+          lat=EXCLUDED.lat, lng=EXCLUDED.lng, updated_at=NOW()
       `, [`major-${cinema.id}`, cinema.id, cinema.nameTH, cinema.nameTH, cinema.lat, cinema.lng]);
     }
 
-    // ── Scrape showtimes for each cinema × each date ──────────────────────────
     let totalInserted = 0;
-    const movieCache = {}; // avoid duplicate movie upserts
+    const movieCache  = {};
 
     for (const cinema of CINEMAS) {
       if (!cinema.lat) continue;
 
       for (const date of dates) {
         try {
-          const html = await fetchShowtimeHtml(cinema.id, date);
+          const html      = await fetchShowtimeHtml(cinema.id, date);
           const showtimes = parseShowtimeHtml(html, cinema.id, date);
 
+          if (showtimes.length > 0) {
+            console.log(`  → Major [${cinema.id}] ${date}: ${showtimes.length} slots`);
+          }
+
           for (const st of showtimes) {
-            // Upsert movie if we have enough data and haven't done it yet
-            if (st.movieId && !movieCache[st.movieId]) {
+            if (!st.movieId || !st.showTime || st.showTime < new Date()) continue;
+
+            // Upsert movie once
+            if (!movieCache[st.movieId]) {
               await client.query(`
                 INSERT INTO movies (id, source, source_id, title_th, title_en, poster_url, rating, updated_at)
-                VALUES ($1, 'major', $2, $3, $4, $5, $6, NOW())
+                VALUES ($1,'major',$2,$3,$4,$5,$6,NOW())
                 ON CONFLICT (id) DO UPDATE SET
-                  title_th   = EXCLUDED.title_th,
-                  title_en   = EXCLUDED.title_en,
-                  poster_url = EXCLUDED.poster_url,
-                  rating     = EXCLUDED.rating,
-                  updated_at = NOW()
-              `, [st.movieId, st.movieId.replace('major-',''), st.titleTH, st.titleEN, st.poster, st.rating]);
+                  title_th=EXCLUDED.title_th, title_en=EXCLUDED.title_en,
+                  poster_url=EXCLUDED.poster_url, rating=EXCLUDED.rating, updated_at=NOW()
+              `, [st.movieId, st.movieId.replace('major-',''), st.titleTH, st.titleTH, st.poster, st.rating]);
               movieCache[st.movieId] = true;
             }
 
-            // Upsert showtime
-            if (st.movieId && st.showTime > new Date()) {
-              await client.query(`
-                INSERT INTO showtimes (id, cinema_id, movie_id, show_time, screen_type,
-                                       audio, subtitles, is_sold_out, booking_url, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-                ON CONFLICT (id) DO UPDATE SET
-                  is_sold_out = EXCLUDED.is_sold_out,
-                  updated_at  = NOW()
-              `, [
-                st.id, st.cinemaId, st.movieId, st.showTime.toISOString(),
-                st.screenType, st.audio, st.subtitles,
-                st.isSoldOut, st.bookingUrl,
-              ]);
-              totalInserted++;
-            }
+            await client.query(`
+              INSERT INTO showtimes (id, cinema_id, movie_id, show_time, screen_name, screen_type,
+                                     audio, subtitles, is_sold_out, booking_url, updated_at)
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+              ON CONFLICT (id) DO UPDATE SET is_sold_out=EXCLUDED.is_sold_out, updated_at=NOW()
+            `, [
+              st.id, st.cinemaId, st.movieId, st.showTime.toISOString(),
+              st.screenName, st.screenType, st.audio, st.subtitles,
+              st.isSoldOut, st.bookingUrl,
+            ]);
+            totalInserted++;
           }
 
-          await sleep(300); // be polite between requests
+          await sleep(300);
         } catch (err) {
-          // Log and continue — don't let one cinema/date failure kill the whole scrape
           console.warn(`  ⚠️  Major [${cinema.id}] ${date}: ${err.message}`);
         }
       }
@@ -221,11 +185,6 @@ async function scrapeMajor() {
   } finally {
     client.release();
   }
-}
-
-// ─── Named alias used in scraper ─────────────────────────────────────────────
-async function fetchShowtimeHtml(cinemaId, date) {
-  return fetchShowtimes(cinemaId, date);
 }
 
 module.exports = { scrapeMajor };
