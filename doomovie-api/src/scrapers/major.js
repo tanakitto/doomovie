@@ -1,105 +1,92 @@
-// Major Cineplex scraper — fixed with correct HTML selectors
-// Verified against actual majorcineplex.com showtime page structure
+// Major Cineplex scraper — fixed export and selectors
+// Confirmed endpoint: GET /showtimes/get_showtime/?cinema={id}&date={YYYY-MM-DD}
 
 const axios   = require('axios');
 const cheerio = require('cheerio');
 const { pool } = require('../db');
 
+// Load geocoded cinema list
 const CINEMAS = require('../../data/major_cinemas.json');
+
 const BASE    = 'https://www.majorcineplex.com';
 const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Accept':     'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept':          'text/html,application/xhtml+xml,*/*;q=0.8',
   'Accept-Language': 'th-TH,th;q=0.9,en;q=0.8',
-  'Referer':    'https://www.majorcineplex.com/',
+  'Referer':         'https://www.majorcineplex.com/',
+  'X-Requested-With':'XMLHttpRequest',
 };
 
 async function fetchShowtimeHtml(cinemaId, date) {
   const url = `${BASE}/showtimes/get_showtime/?cinema=${cinemaId}&date=${date}`;
-  const res = await axios.get(url, { headers: HEADERS, timeout: 15000 });
+  const res  = await axios.get(url, { headers: HEADERS, timeout: 15000 });
   return res.data;
 }
 
-// Parse Major's showtime HTML fragment
-// Actual structure from Network tab research:
-// .box-showtime-cinema > .bsc-list items
-function parseShowtimeHtml(html, cinemaId, date) {
-  const $ = cheerio.load(html);
-  const showtimes = [];
+function parseShowtimes(html, cinemaId, date) {
+  const $   = cheerio.load(html);
+  const out = [];
 
-  // Each movie block
-  $('.box-showtime-cinema, [class*="showtime-cinema"]').each((_, movieBlock) => {
-    const $b      = $(movieBlock);
-    const movieId = $b.attr('data-movie-id');
-    const titleTH = $b.find('.bsc-movie-name, .movie-name, [class*="movie-name"]').first().text().trim();
-    const rating  = $b.find('.bsc-rate, .movie-rate, [class*="rate"]').first().text().trim();
-    const poster  = $b.find('img').first().attr('src');
+  // Major's actual HTML structure from Network tab research
+  // Each movie block has class box-showtime-cinema or bsc-*
+  $('[class*="box-showtime"], .bsc-movie, [data-movie-id]').each((_, el) => {
+    const $el     = $(el);
+    const movieId = $el.attr('data-movie-id') || $el.closest('[data-movie-id]').attr('data-movie-id');
+    const titleTH = $el.find('[class*="movie-name"], [class*="movie-title"]').first().text().trim();
+    const rating  = $el.find('[class*="rate"], [class*="rating"]').first().text().trim();
+    const poster  = $el.find('img').first().attr('src') || $el.find('img').first().attr('data-src');
 
-    // Each screen type row
-    $b.find('.bsc-list, [class*="bsc-list"]').each((_, screenRow) => {
-      const $row      = $(screenRow);
-      const screenRaw = $row.find('.bsc-screen-type, .screen-type, [class*="screen-type"]').text().trim()
-                     || $row.find('.bsc-screen, [class*="screen"]').first().text().trim()
-                     || 'STANDARD';
+    // Screen type rows
+    $el.find('[class*="bsc-list"], [class*="screen-list"], [class*="showtime-list"]').each((_, row) => {
+      const $row      = $(row);
+      const screenRaw = $row.find('[class*="screen-type"], [class*="screen-name"]').first().text().trim() || 'STANDARD';
 
-      // Time slots — Major uses anchor tags with onclick or data attributes
-      $row.find('a.bsc-btn-time, a[class*="btn-time"], a[class*="showtime"], .time-slot a').each((_, slot) => {
-        const $slot    = $(slot);
-        const timeText = $slot.text().trim();
-        if (!timeText.match(/^\d{1,2}:\d{2}$/)) return;
+      // Time buttons
+      $row.find('a[class*="time"], a[class*="btn"], .bsc-btn-time').each((_, btn) => {
+        const $btn    = $(btn);
+        const time    = $btn.text().trim();
+        if (!time.match(/^\d{1,2}:\d{2}$/)) return;
 
-        const href      = $slot.attr('href') || '';
-        const onclick   = $slot.attr('onclick') || '';
-        const sessionId = href.match(/session[_-]?id[=\/](\w+)/i)?.[1]
-                       || onclick.match(/session[_-]?id[=\'\"]([\w-]+)/i)?.[1]
-                       || null;
+        const isSoldOut = $btn.hasClass('sold-out') || $btn.hasClass('bsc-btn-soldout');
+        const href      = $btn.attr('href') || '';
+        const sessionId = href.match(/session[_=](\w+)/i)?.[1];
+        const cls       = ($btn.attr('class') || '').toLowerCase();
+        const audio     = cls.includes('eng') ? 'EN' : 'TH';
 
-        const isSoldOut = $slot.hasClass('sold-out') || $slot.hasClass('bsc-btn-soldout')
-                       || $slot.attr('disabled') === 'disabled';
-
-        const cls      = ($slot.attr('class') || '').toLowerCase();
-        const audio    = cls.includes('eng') ? 'EN' : 'TH';
-        const subtitles = cls.includes('sub') ? ['TH'] : [];
-
-        const [h, m]  = timeText.split(':').map(Number);
+        const [h, m] = time.split(':').map(Number);
         const showTime = new Date(`${date}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00+07:00`);
 
-        const id = sessionId
-          ? `major-${sessionId}`
-          : `major-${cinemaId}-${movieId || 'unk'}-${date}-${timeText.replace(':','')}`;
-
-        showtimes.push({
-          id,
+        out.push({
+          id:          sessionId ? `major-${sessionId}` : `major-${cinemaId}-${movieId||'x'}-${date}-${time.replace(':','')}`,
           cinemaId:    `major-${cinemaId}`,
           movieId:     movieId ? `major-${movieId}` : null,
           titleTH, rating, poster,
           showTime,
-          screenType:  normalizeScreenType(screenRaw),
+          screenType:  normalizeScreen(screenRaw),
           screenName:  screenRaw,
-          audio, subtitles,
+          audio,
+          subtitles:   [],
           isSoldOut,
-          bookingUrl:  sessionId
-            ? `${BASE}/buy-ticket?session=${sessionId}`
-            : `${BASE}/movie/${movieId}`,
+          bookingUrl:  sessionId ? `${BASE}/buy-ticket?session=${sessionId}` : `${BASE}/movie/${movieId}`,
         });
       });
     });
   });
 
-  return showtimes;
+  return out;
 }
 
-function normalizeScreenType(raw = '') {
+function normalizeScreen(raw = '') {
   const s = raw.toUpperCase();
-  if (s.includes('IMAX'))   return 'IMAX';
-  if (s.includes('4DX'))    return '4DX';
-  if (s.includes('ULTRA'))  return 'ULTRASCREEN';
-  if (s.includes('LASER'))  return 'LASER';
-  if (s.includes('DOLBY'))  return 'DOLBY';
+  if (s.includes('IMAX'))  return 'IMAX';
+  if (s.includes('4DX'))   return '4DX';
+  if (s.includes('ULTRA')) return 'ULTRASCREEN';
+  if (s.includes('LASER')) return 'LASER';
+  if (s.includes('DOLBY')) return 'DOLBY';
   return 'STANDARD';
 }
 
-function getDateRange(days = 7) {
+function getDates(days = 7) {
   return Array.from({ length: days }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() + i);
@@ -114,18 +101,18 @@ async function scrapeMajor() {
   const client = await pool.connect();
 
   try {
-    const dates = getDateRange(7);
+    const dates = getDates(7);
 
-    // Upsert all cinemas from geocoded JSON
-    for (const cinema of CINEMAS) {
-      if (!cinema.lat) continue;
+    // Upsert cinemas
+    for (const c of CINEMAS) {
+      if (!c.lat) continue;
       await client.query(`
         INSERT INTO cinemas (id, source, source_id, name_th, name_en, lat, lng, updated_at)
         VALUES ($1,'major',$2,$3,$4,$5,$6,NOW())
         ON CONFLICT (id) DO UPDATE SET
           name_th=EXCLUDED.name_th, name_en=EXCLUDED.name_en,
           lat=EXCLUDED.lat, lng=EXCLUDED.lng, updated_at=NOW()
-      `, [`major-${cinema.id}`, cinema.id, cinema.nameTH, cinema.nameTH, cinema.lat, cinema.lng]);
+      `, [`major-${c.id}`, c.id, c.nameTH, c.nameTH, c.lat, c.lng]);
     }
 
     let totalInserted = 0;
@@ -133,20 +120,18 @@ async function scrapeMajor() {
 
     for (const cinema of CINEMAS) {
       if (!cinema.lat) continue;
-
       for (const date of dates) {
         try {
           const html      = await fetchShowtimeHtml(cinema.id, date);
-          const showtimes = parseShowtimeHtml(html, cinema.id, date);
+          const showtimes = parseShowtimes(html, cinema.id, date);
 
           if (showtimes.length > 0) {
             console.log(`  → Major [${cinema.id}] ${date}: ${showtimes.length} slots`);
           }
 
           for (const st of showtimes) {
-            if (!st.movieId || !st.showTime || st.showTime < new Date()) continue;
+            if (!st.movieId || st.showTime < new Date()) continue;
 
-            // Upsert movie once
             if (!movieCache[st.movieId]) {
               await client.query(`
                 INSERT INTO movies (id, source, source_id, title_th, title_en, poster_url, rating, updated_at)
@@ -170,7 +155,6 @@ async function scrapeMajor() {
             ]);
             totalInserted++;
           }
-
           await sleep(300);
         } catch (err) {
           console.warn(`  ⚠️  Major [${cinema.id}] ${date}: ${err.message}`);
@@ -178,9 +162,9 @@ async function scrapeMajor() {
       }
     }
 
-    console.log(`  ✅ Major Cineplex done: ${totalInserted} showtimes upserted`);
+    console.log(`  ✅ Major done: ${totalInserted} showtimes upserted`);
   } catch (err) {
-    console.error('  ❌ Major scrape failed:', err.message);
+    console.error('  ❌ Major failed:', err.message);
     throw err;
   } finally {
     client.release();
