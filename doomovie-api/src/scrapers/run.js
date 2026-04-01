@@ -22,11 +22,14 @@ async function runScrape() {
   console.log('='.repeat(50));
 }
 
-// Run immediately on startup
-runScrape();
+// startCron — called by index.js on startup
+function startCron() {
+  // Run immediately on startup
+  runScrape();
 
-// Then every 3 hours
-cron.schedule('0 */3 * * *', runScrape, { timezone: 'Asia/Bangkok' });
-console.log('⏰ Scraper scheduled: 0 */3 * * *');
+  // Then every 3 hours
+  cron.schedule('0 */3 * * *', runScrape, { timezone: 'Asia/Bangkok' });
+  console.log('⏰ Scraper scheduled: 0 */3 * * *');
+}
 
-module.exports = { runScrape };
+module.exports = { startCron, runScrape };
