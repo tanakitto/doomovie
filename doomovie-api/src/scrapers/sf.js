@@ -1,43 +1,60 @@
-// SF Cinema scraper v4 — via Cloudflare Worker proxy
-// Worker runs on Cloudflare's own network so SF cannot block it
-// Set SF_PROXY_URL env var in Railway after deploying the Worker
+// SF Cinema scraper v5 — confirmed working endpoints from browser testing
+// All 3 endpoints are on onl.sfcinema.com and return 200 from browsers
+// Railway IPs are blocked by Cloudflare — use SF_PROXY_URL (Cloudflare Worker)
+//
+// Confirmed endpoints (Apr 2026):
+//   branches: GET https://onl.sfcinema.com/ticket/data/branch?locale=en&channel=WEB&spceialScreenId=&seatCateId=&branch=
+//   content:  GET https://onl.sfcinema.com/ticket/data/content?locale=en&channel=WEB&type=all&is_short=false
+//   sessions: GET https://onl.sfcinema.com/ticket/data/session?locale=en&channel=WEB
 
 const axios  = require('axios');
 const { pool } = require('../db');
 
-// Falls back to direct call if no proxy configured (for local dev)
 const PROXY = process.env.SF_PROXY_URL || null;
 
+// Build URL — route through Cloudflare Worker proxy if configured
 function sfUrl(path, query = '') {
   if (PROXY) {
-    const encoded = encodeURIComponent(query);
-    return `${PROXY}?path=${encodeURIComponent(path)}&query=${encoded}`;
+    return `${PROXY}?path=${encodeURIComponent(path)}&query=${encodeURIComponent(query)}`;
   }
-  const domain = path.startsWith('/api/v1/')
-    ? 'https://www.sfcinema.com'
-    : 'https://onl.sfcinema.com';
-  return `${domain}${path}${query ? '?' + query : ''}`;
+  return `https://onl.sfcinema.com${path}${query ? '?' + query : ''}`;
 }
 
 const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  'Accept':     'application/json',
+  'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept':          'application/json, text/plain, */*',
+  'Accept-Language': 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Origin':          'https://www.sfcinema.com',
+  'Referer':         'https://www.sfcinema.com/',
+  'sec-fetch-dest':  'empty',
+  'sec-fetch-mode':  'cors',
+  'sec-fetch-site':  'same-site',
 };
 
+// 67 branches with id, name, phone, GPS coords
 async function fetchBranches() {
-  const res = await axios.get(sfUrl('/api/v1/branch', 'locale=en&channel=WEB'), { headers: HEADERS, timeout: 15000 });
-  return Array.isArray(res.data) ? res.data : (res.data.data || []);
-}
-
-async function fetchBranchContent(branchId) {
-  const query = `locale=en&branch=${branchId}&is_short=false&type=all&channle=web&system=&audio=&subTitle=&channel=WEB`;
-  const res = await axios.get(sfUrl('/ticket/data/content', query), { headers: HEADERS, timeout: 15000 });
+  const res = await axios.get(
+    sfUrl('/ticket/data/branch', 'locale=en&channel=WEB&spceialScreenId=&seatCateId=&branch='),
+    { headers: HEADERS, timeout: 20000 }
+  );
   return res.data.data || [];
 }
 
-async function fetchBranchSessions(branchId) {
-  const query = `locale=en&contentId=&branch=${branchId}&specialScreenId=&channel=WEB`;
-  const res = await axios.get(sfUrl('/ticket/data/session', query), { headers: HEADERS, timeout: 15000 });
+// All movies now showing + coming soon
+async function fetchContent() {
+  const res = await axios.get(
+    sfUrl('/ticket/data/content', 'locale=en&channel=WEB&type=all&is_short=false'),
+    { headers: HEADERS, timeout: 30000 }
+  );
+  return res.data.data || [];
+}
+
+// All sessions (8,900+ records — full schedule all branches all dates)
+async function fetchSessions() {
+  const res = await axios.get(
+    sfUrl('/ticket/data/session', 'locale=en&channel=WEB'),
+    { headers: HEADERS, timeout: 60000 }
+  );
   return res.data.data || [];
 }
 
@@ -53,77 +70,94 @@ function normalizeScreenType(session) {
   return 'STANDARD';
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
 async function scrapeSF() {
-  console.log(`🎬 SF Cinema: scraping via ${PROXY ? 'Cloudflare Worker proxy' : 'direct'}...`);
+  const mode = PROXY ? `Cloudflare Worker (${PROXY})` : 'direct (may 403)';
+  console.log(`🎬 SF Cinema: scraping via ${mode}...`);
   const client = await pool.connect();
 
   try {
-    const branches = await fetchBranches();
-    console.log(`  → ${branches.length} branches`);
-    if (!branches.length) { console.warn('  ⚠️  SF: no branches'); return; }
+    // Fetch all 3 in parallel — saves time
+    const [branches, contents, sessions] = await Promise.all([
+      fetchBranches(),
+      fetchContent(),
+      fetchSessions(),
+    ]);
 
+    console.log(`  → ${branches.length} branches, ${contents.length} movies, ${sessions.length} sessions`);
+
+    if (!branches.length || !sessions.length) {
+      console.warn('  ⚠️  SF: empty response — proxy may not be configured');
+      return;
+    }
+
+    // Build lookup maps
+    const contentMap = Object.fromEntries(contents.map(c => [c.id, c]));
+
+    // Upsert cinemas — branch object has lat/lng under geoLocation
     for (const b of branches) {
+      const lat = b.geoLocation?.lat ?? b.lat ?? null;
+      const lng = b.geoLocation?.lng ?? b.lng ?? b.long ?? null;
       await client.query(`
         INSERT INTO cinemas (id, source, source_id, name_en, lat, lng, updated_at)
         VALUES ($1,'sf',$2,$3,$4,$5,NOW())
-        ON CONFLICT (id) DO UPDATE SET name_en=EXCLUDED.name_en, lat=EXCLUDED.lat, lng=EXCLUDED.lng, updated_at=NOW()
-      `, [`sf-${b.id}`, b.id, b.name, b.geoLocation?.lat ?? null, b.geoLocation?.lng ?? null]);
+        ON CONFLICT (id) DO UPDATE SET
+          name_en=EXCLUDED.name_en, lat=EXCLUDED.lat,
+          lng=EXCLUDED.lng, updated_at=NOW()
+      `, [`sf-${b.id}`, b.id, b.name, lat, lng]);
     }
 
-    let totalMovies = 0, totalShowtimes = 0;
+    // Upsert movies
     const movieCache = {};
-
-    for (const branch of branches) {
-      try {
-        const [contents, sessions] = await Promise.all([
-          fetchBranchContent(branch.id),
-          fetchBranchSessions(branch.id),
-        ]);
-        await sleep(300);
-
-        const contentMap = Object.fromEntries(contents.map(c => [c.id, c]));
-        console.log(`  → SF [${branch.id}]: ${contents.length} movies, ${sessions.length} sessions`);
-
-        for (const c of contents) {
-          if (movieCache[c.id]) continue;
-          await client.query(`
-            INSERT INTO movies (id, source, source_id, title_en, poster_url, backdrop_url,
-                                synopsis, runtime, rating, genre, director, trailer_url, updated_at)
-            VALUES ($1,'sf',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
-            ON CONFLICT (id) DO UPDATE SET title_en=EXCLUDED.title_en, poster_url=EXCLUDED.poster_url,
-              backdrop_url=EXCLUDED.backdrop_url, synopsis=EXCLUDED.synopsis, runtime=EXCLUDED.runtime,
-              rating=EXCLUDED.rating, genre=EXCLUDED.genre, director=EXCLUDED.director,
-              trailer_url=EXCLUDED.trailer_url, updated_at=NOW()
-          `, [`sf-${c.id}`, c.id, c.title, c.media?.portrait??null, c.media?.landscape??null,
-              c.synopsis??null, c.contentLength??null, c.rating??null, c.genre??null,
-              c.director??null, c.media?.video??null]);
-          movieCache[c.id] = true;
-          totalMovies++;
-        }
-
-        for (const s of sessions) {
-          if (!contentMap[s.contentId]) continue;
-          const showTime = new Date(s.sessionDatetime);
-          if (showTime < new Date()) continue;
-          await client.query(`
-            INSERT INTO showtimes (id, cinema_id, movie_id, show_time, screen_name, screen_type,
-                                   audio, subtitles, is_sold_out, booking_url, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
-            ON CONFLICT (id) DO UPDATE SET is_sold_out=EXCLUDED.is_sold_out, updated_at=NOW()
-          `, [`sf-${s.id}`, `sf-${branch.id}`, `sf-${s.contentId}`, showTime.toISOString(),
-              s.screenName, normalizeScreenType(s), s.audio??null, s.subtitles??[],
-              s.isSoldOut??false,
-              `https://www.sfcinema.com/movie/${s.contentId}/showtime?session=${s.id}&branch=${s.branchId}`]);
-          totalShowtimes++;
-        }
-      } catch (err) {
-        console.warn(`  ⚠️  SF [${branch.id}]: ${err.message}`);
-      }
+    for (const c of contents) {
+      if (movieCache[c.id]) continue;
+      await client.query(`
+        INSERT INTO movies (id, source, source_id, title_en, poster_url, backdrop_url,
+                            synopsis, runtime, rating, genre, director, trailer_url, updated_at)
+        VALUES ($1,'sf',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title_en=EXCLUDED.title_en, poster_url=EXCLUDED.poster_url,
+          backdrop_url=EXCLUDED.backdrop_url, synopsis=EXCLUDED.synopsis,
+          runtime=EXCLUDED.runtime, rating=EXCLUDED.rating, genre=EXCLUDED.genre,
+          director=EXCLUDED.director, trailer_url=EXCLUDED.trailer_url, updated_at=NOW()
+      `, [
+        `sf-${c.id}`, c.id, c.title,
+        c.media?.portrait ?? null, c.media?.landscape ?? null,
+        c.synopsis ?? null, c.contentLength ?? null, c.rating ?? null,
+        c.genre ?? null, c.director ?? null, c.media?.video ?? null,
+      ]);
+      movieCache[c.id] = true;
     }
 
-    console.log(`  ✅ SF done: ${totalMovies} movies, ${totalShowtimes} showtimes`);
+    // Upsert showtimes
+    let inserted = 0;
+    const now = new Date();
+    for (const s of sessions) {
+      if (!contentMap[s.contentId]) continue;
+      const showTime = new Date(s.sessionDatetime);
+      if (showTime < now) continue;
+
+      await client.query(`
+        INSERT INTO showtimes (id, cinema_id, movie_id, show_time, screen_name,
+                               screen_type, audio, subtitles, is_sold_out, booking_url, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          is_sold_out=EXCLUDED.is_sold_out, updated_at=NOW()
+      `, [
+        `sf-${s.id}`,
+        `sf-${s.branchId}`,
+        `sf-${s.contentId}`,
+        showTime.toISOString(),
+        s.screenName,
+        normalizeScreenType(s),
+        s.audio ?? null,
+        s.subtitles ?? [],
+        s.isSoldOut ?? false,
+        `https://www.sfcinema.com/movie/${s.contentId}/showtime?session=${s.id}&branch=${s.branchId}`,
+      ]);
+      inserted++;
+    }
+
+    console.log(`  ✅ SF done: ${Object.keys(movieCache).length} movies, ${inserted} showtimes`);
   } catch (err) {
     console.error('  ❌ SF failed:', err.message);
     throw err;
