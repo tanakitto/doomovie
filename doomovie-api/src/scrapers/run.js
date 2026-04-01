@@ -1,68 +1,32 @@
-// Scraper runner
-// Runs all scrapers in sequence and schedules them via cron
-// Can also be run manually: node src/scrapers/run.js
+// Scraper runner — uses showtimes.everyday.in.th as data source
+// This bypasses SF 403 and Major session issues since Sarun's site is Thai-hosted
 
-require('dotenv').config();
 const cron = require('node-cron');
-const { scrapeSF }    = require('./sf');
-const { scrapeMajor } = require('./major');
-const { scrapeHouse } = require('./house');
+const { scrapeEveryday } = require('./everyday');
 
-async function runAllScrapers() {
+async function runScrape() {
   const start = Date.now();
-  console.log(`\n${'═'.repeat(50)}`);
+  console.log('\n' + '='.repeat(50));
   console.log(`🚀 Scrape started at ${new Date().toISOString()}`);
-  console.log('═'.repeat(50));
-
-  const results = { sf: 'pending', major: 'pending', house: 'pending' };
-
-  // Run scrapers sequentially to avoid hammering servers simultaneously
-  try {
-    await scrapeSF();
-    results.sf = '✅';
-  } catch (err) {
-    results.sf = `❌ ${err.message}`;
-  }
+  console.log('='.repeat(50));
 
   try {
-    await scrapeMajor();
-    results.major = '✅';
+    await scrapeEveryday();
   } catch (err) {
-    results.major = `❌ ${err.message}`;
-  }
-
-  try {
-    await scrapeHouse();
-    results.house = '✅';
-  } catch (err) {
-    results.house = `❌ ${err.message}`;
+    console.error('❌ Scrape error:', err.message);
   }
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-  console.log(`\n${'═'.repeat(50)}`);
+  console.log('='.repeat(50));
   console.log(`✅ Scrape complete in ${elapsed}s`);
-  console.log(`   SF Cinema:    ${results.sf}`);
-  console.log(`   Major:        ${results.major}`);
-  console.log(`   House Samyan: ${results.house}`);
-  console.log('═'.repeat(50) + '\n');
+  console.log('='.repeat(50));
 }
 
-// If run directly (node src/scrapers/run.js), execute once immediately
-if (require.main === module) {
-  runAllScrapers().then(() => process.exit(0)).catch(err => {
-    console.error(err);
-    process.exit(1);
-  });
-}
+// Run immediately on startup
+runScrape();
 
-// Schedule via cron — default every 3 hours
-function startCron() {
-  const schedule = process.env.SCRAPE_CRON || '0 */3 * * *';
-  console.log(`⏰ Scraper scheduled: ${schedule}`);
-  cron.schedule(schedule, runAllScrapers, { timezone: 'Asia/Bangkok' });
+// Then every 3 hours
+cron.schedule('0 */3 * * *', runScrape, { timezone: 'Asia/Bangkok' });
+console.log('⏰ Scraper scheduled: 0 */3 * * *');
 
-  // Also run immediately on startup
-  runAllScrapers();
-}
-
-module.exports = { runAllScrapers, startCron };
+module.exports = { runScrape };
