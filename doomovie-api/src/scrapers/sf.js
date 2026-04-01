@@ -7,7 +7,19 @@ const { pool } = require('../db');
 
 const BASE     = 'https://onl.sfcinema.com/ticket/data';
 const BRANCH   = 'https://www.sfcinema.com/api/v1/branch';
-const HEADERS  = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
+const HEADERS  = {
+  'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept':          'application/json, text/plain, */*',
+  'Accept-Language': 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Origin':          'https://www.sfcinema.com',
+  'Referer':         'https://www.sfcinema.com/',
+  'sec-ch-ua':       '"Chromium";v="124", "Google Chrome";v="124"',
+  'sec-ch-ua-mobile':'?0',
+  'sec-fetch-dest':  'empty',
+  'sec-fetch-mode':  'cors',
+  'sec-fetch-site':  'same-site',
+};
 
 // ─── Fetch all SF branches with GPS ──────────────────────────────────────────
 async function fetchBranches() {
